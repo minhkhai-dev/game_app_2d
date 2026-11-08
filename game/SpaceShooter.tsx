@@ -1,4 +1,4 @@
-// app/page.tsx
+// app/space-shooter/page.tsx
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
@@ -26,6 +26,7 @@ interface Enemy {
   height: number;
   active: boolean;
   type: 'normal' | 'fast' | 'tank';
+  hitCount?: number;
 }
 
 interface Explosion {
@@ -40,7 +41,14 @@ const GAME_HEIGHT = 700;
 const PLAYER_WIDTH = 40;
 const PLAYER_HEIGHT = 40;
 const BULLET_SIZE = 5;
-const ENEMY_SIZE = 35;
+const ENEMY_SIZE = 90;
+
+// Emoji fallback (khi ảnh chưa tải xong)
+const ENEMY_EMOJI = {
+  normal: '👾',
+  fast: '👻',
+  tank: '🤖',
+};
 
 export default function SpaceShooter() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -50,14 +58,21 @@ export default function SpaceShooter() {
   const [highScore, setHighScore] = useState<number>(0);
   const [lives, setLives] = useState<number>(5);
   const [level, setLevel] = useState<number>(1);
-  
+
+  // State lưu ảnh enemy
+  const [enemyImages, setEnemyImages] = useState({
+    normal: null as HTMLImageElement | null,
+    fast: null as HTMLImageElement | null,
+    tank: null as HTMLImageElement | null,
+  });
+
   const playerRef = useRef<Player>({
     x: GAME_WIDTH / 2 - PLAYER_WIDTH / 2,
     y: GAME_HEIGHT - 80,
     width: PLAYER_WIDTH,
     height: PLAYER_HEIGHT,
   });
-  
+
   const bulletsRef = useRef<Bullet[]>([]);
   const enemiesRef = useRef<Enemy[]>([]);
   const explosionsRef = useRef<Explosion[]>([]);
@@ -67,6 +82,30 @@ export default function SpaceShooter() {
   const enemySpawnCooldownRef = useRef<number>(0);
   const frameRef = useRef<number>(0);
 
+  // Tải ảnh enemy
+  useEffect(() => {
+    const loadImage = (src: string): Promise<HTMLImageElement> => {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.src = src;
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error(`Failed to load ${src}`));
+      });
+    };
+
+    Promise.all([
+      loadImage('/image/hinhCun.webp'),
+      loadImage('/image/hinhCun.webp'),
+      loadImage('/image/hinhCun.webp'),
+    ])
+      .then(([normal, fast, tank]) => {
+        setEnemyImages({ normal, fast, tank });
+      })
+      .catch((err) => {
+        console.warn('Không tải được ảnh, sẽ dùng emoji fallback', err);
+      });
+  }, []);
+
   // Khởi tạo game
   const initGame = useCallback(() => {
     playerRef.current = {
@@ -75,7 +114,6 @@ export default function SpaceShooter() {
       width: PLAYER_WIDTH,
       height: PLAYER_HEIGHT,
     };
-    
     bulletsRef.current = [];
     enemiesRef.current = [];
     explosionsRef.current = [];
@@ -83,7 +121,6 @@ export default function SpaceShooter() {
     shootCooldownRef.current = 0;
     enemySpawnCooldownRef.current = 0;
     frameRef.current = 0;
-    
     setScore(0);
     setLives(5);
     setLevel(1);
@@ -97,10 +134,11 @@ export default function SpaceShooter() {
     setGameOver(false);
   }, [initGame]);
 
-  // Bắn đạn
+  // Bắn đạn (chỉ khi nhấn space)
   const shoot = useCallback(() => {
     if (shootCooldownRef.current > 0) return;
-    
+    if (!keysRef.current.has(' ')) return; // CHỈ BẮN KHI NHẤN SPACE
+
     bulletsRef.current.push({
       x: playerRef.current.x + PLAYER_WIDTH / 2 - BULLET_SIZE / 2,
       y: playerRef.current.y,
@@ -108,42 +146,29 @@ export default function SpaceShooter() {
       height: BULLET_SIZE * 2,
       active: true,
     });
-    
-    shootCooldownRef.current = 10; // Cooldown 10 frames
+    shootCooldownRef.current = 10;
   }, []);
 
   // Tạo enemy mới
   const spawnEnemy = useCallback(() => {
     const rand = Math.random();
     let type: 'normal' | 'fast' | 'tank' = 'normal';
-    let health = 1;
-    let speed = 3;
-    
+
     if (level >= 5) {
-      if (rand < 0.2) {
-        type = 'tank';
-        health = 3;
-        speed = 1.5;
-      } else if (rand < 0.4) {
-        type = 'fast';
-        health = 1;
-        speed = 5;
-      }
+      if (rand < 0.2) type = 'tank';
+      else if (rand < 0.4) type = 'fast';
     } else if (level >= 3) {
-      if (rand < 0.3) {
-        type = 'fast';
-        health = 1;
-        speed = 4.5;
-      }
+      if (rand < 0.3) type = 'fast';
     }
-    
+
     enemiesRef.current.push({
       x: Math.random() * (GAME_WIDTH - ENEMY_SIZE),
       y: -ENEMY_SIZE,
       width: ENEMY_SIZE,
       height: ENEMY_SIZE,
       active: true,
-      type: type,
+      type,
+      hitCount: 0,
     });
   }, [level]);
 
@@ -166,12 +191,12 @@ export default function SpaceShooter() {
       playerRef.current.y += speed;
     }
 
-    // Bắn đạn
+    // Bắn đạn (gọi mỗi frame nhưng bên trong shoot đã kiểm tra cooldown và phím)
     shoot();
-    
+
     // Cooldown
     if (shootCooldownRef.current > 0) shootCooldownRef.current--;
-    
+
     // Spawn enemy
     const spawnRate = Math.max(20, 50 - level * 2);
     if (enemySpawnCooldownRef.current <= 0) {
@@ -182,7 +207,7 @@ export default function SpaceShooter() {
     }
 
     // Cập nhật đạn
-    bulletsRef.current = bulletsRef.current.filter(bullet => {
+    bulletsRef.current = bulletsRef.current.filter((bullet) => {
       bullet.y -= 7;
       return bullet.y > 0 && bullet.active;
     });
@@ -193,10 +218,9 @@ export default function SpaceShooter() {
       let speed = 2;
       if (enemy.type === 'fast') speed = 5;
       else if (enemy.type === 'tank') speed = 1.5;
-      
+
       enemy.y += speed + level * 0.2;
-      
-      // Kiểm tra enemy ra khỏi màn hình
+
       if (enemy.y > GAME_HEIGHT) {
         enemiesRef.current.splice(i, 1);
         i--;
@@ -206,58 +230,55 @@ export default function SpaceShooter() {
     // Va chạm đạn - enemy
     for (let i = 0; i < bulletsRef.current.length; i++) {
       const bullet = bulletsRef.current[i];
-      
       for (let j = 0; j < enemiesRef.current.length; j++) {
         const enemy = enemiesRef.current[j];
-        
-        if (bullet.active && enemy.active &&
-            bullet.x < enemy.x + enemy.width &&
-            bullet.x + bullet.width > enemy.x &&
-            bullet.y < enemy.y + enemy.height &&
-            bullet.y + bullet.height > enemy.y) {
-          
+        if (
+          bullet.active &&
+          enemy.active &&
+          bullet.x < enemy.x + enemy.width &&
+          bullet.x + bullet.width > enemy.x &&
+          bullet.y < enemy.y + enemy.height &&
+          bullet.y + bullet.height > enemy.y
+        ) {
           bullet.active = false;
-          
-          // Xử lý enemy dựa trên loại
+
           if (enemy.type === 'tank') {
-            // Tank cần 3 hit
-            const tankHitCount = (enemy as any).hitCount || 0;
-            if (tankHitCount + 1 >= 3) {
+            enemy.hitCount = (enemy.hitCount || 0) + 1;
+            if (enemy.hitCount >= 3) {
               enemy.active = false;
               explosionsRef.current.push({ x: enemy.x, y: enemy.y, frames: 10 });
-              setScore(prev => prev + 30);
+              setScore((prev) => prev + 30);
             } else {
-              (enemy as any).hitCount = tankHitCount + 1;
               explosionsRef.current.push({ x: enemy.x, y: enemy.y, frames: 5 });
-              setScore(prev => prev + 10);
+              setScore((prev) => prev + 10);
             }
           } else {
             enemy.active = false;
             explosionsRef.current.push({ x: enemy.x, y: enemy.y, frames: 10 });
-            setScore(prev => prev + (enemy.type === 'fast' ? 20 : 10));
+            setScore((prev) => prev + (enemy.type === 'fast' ? 20 : 10));
           }
           break;
         }
       }
     }
 
-    // Xóa enemy đã chết
-    enemiesRef.current = enemiesRef.current.filter(enemy => enemy.active);
-    bulletsRef.current = bulletsRef.current.filter(bullet => bullet.active);
+    // Xóa enemy, đạn không active
+    enemiesRef.current = enemiesRef.current.filter((e) => e.active);
+    bulletsRef.current = bulletsRef.current.filter((b) => b.active);
 
     // Va chạm player - enemy
     for (let i = 0; i < enemiesRef.current.length; i++) {
       const enemy = enemiesRef.current[i];
-      
-      if (enemy.active &&
-          playerRef.current.x < enemy.x + enemy.width &&
-          playerRef.current.x + PLAYER_WIDTH > enemy.x &&
-          playerRef.current.y < enemy.y + enemy.height &&
-          playerRef.current.y + PLAYER_HEIGHT > enemy.y) {
-        
+      if (
+        enemy.active &&
+        playerRef.current.x < enemy.x + enemy.width &&
+        playerRef.current.x + PLAYER_WIDTH > enemy.x &&
+        playerRef.current.y < enemy.y + enemy.height &&
+        playerRef.current.y + PLAYER_HEIGHT > enemy.y
+      ) {
         enemy.active = false;
         explosionsRef.current.push({ x: playerRef.current.x, y: playerRef.current.y, frames: 20 });
-        setLives(prev => {
+        setLives((prev) => {
           const newLives = prev - 1;
           if (newLives <= 0) {
             setGameOver(true);
@@ -266,8 +287,6 @@ export default function SpaceShooter() {
           }
           return newLives;
         });
-        
-        // Reset player position
         playerRef.current.x = GAME_WIDTH / 2 - PLAYER_WIDTH / 2;
         playerRef.current.y = GAME_HEIGHT - 80;
         break;
@@ -275,16 +294,14 @@ export default function SpaceShooter() {
     }
 
     // Cập nhật explosions
-    explosionsRef.current = explosionsRef.current.filter(exp => {
+    explosionsRef.current = explosionsRef.current.filter((exp) => {
       exp.frames--;
       return exp.frames > 0;
     });
 
     // Tăng level
     const newLevel = Math.floor(score / 500) + 1;
-    if (newLevel > level) {
-      setLevel(newLevel);
-    }
+    if (newLevel > level) setLevel(newLevel);
 
     frameRef.current++;
   }, [gameStarted, gameOver, shoot, spawnEnemy, level, score, highScore]);
@@ -295,14 +312,14 @@ export default function SpaceShooter() {
     const ctx = canvas?.getContext('2d');
     if (!ctx) return;
 
-    // Vẽ background space
+    // Background
     const gradient = ctx.createLinearGradient(0, 0, 0, GAME_HEIGHT);
     gradient.addColorStop(0, '#0a0a2a');
     gradient.addColorStop(1, '#1a1a3a');
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-    
-    // Vẽ sao
+
+    // Sao
     ctx.fillStyle = 'white';
     for (let i = 0; i < 100; i++) {
       const starX = (i * 131) % GAME_WIDTH;
@@ -310,12 +327,10 @@ export default function SpaceShooter() {
       ctx.fillRect(starX, starY, 2, 2);
     }
 
-    // Vẽ player (phi thuyền)
+    // Player
     ctx.save();
     ctx.shadowBlur = 10;
     ctx.shadowColor = '#00ffff';
-    
-    // Thân chính
     ctx.fillStyle = '#00bfff';
     ctx.beginPath();
     ctx.moveTo(playerRef.current.x + PLAYER_WIDTH / 2, playerRef.current.y);
@@ -323,12 +338,8 @@ export default function SpaceShooter() {
     ctx.lineTo(playerRef.current.x + PLAYER_WIDTH / 2, playerRef.current.y + PLAYER_HEIGHT);
     ctx.lineTo(playerRef.current.x + 5, playerRef.current.y + PLAYER_HEIGHT - 10);
     ctx.fill();
-    
-    // Cánh
     ctx.fillStyle = '#1e90ff';
     ctx.fillRect(playerRef.current.x + 5, playerRef.current.y + PLAYER_HEIGHT - 15, 30, 8);
-    
-    // Động cơ
     const engineGlow = frameRef.current % 10 < 5 ? '#ff4500' : '#ff6347';
     ctx.fillStyle = engineGlow;
     ctx.beginPath();
@@ -336,10 +347,9 @@ export default function SpaceShooter() {
     ctx.lineTo(playerRef.current.x + PLAYER_WIDTH / 2, playerRef.current.y + PLAYER_HEIGHT + 5);
     ctx.lineTo(playerRef.current.x + PLAYER_WIDTH / 2 + 8, playerRef.current.y + PLAYER_HEIGHT - 5);
     ctx.fill();
-    
     ctx.restore();
 
-    // Vẽ đạn
+    // Đạn
     ctx.fillStyle = '#ffff00';
     ctx.shadowBlur = 5;
     ctx.shadowColor = '#ffff00';
@@ -347,47 +357,33 @@ export default function SpaceShooter() {
       ctx.fillRect(bullet.x, bullet.y, bullet.width, bullet.height);
     }
 
-    // Vẽ enemy
+    // Enemy - VẼ ẢNH (hoặc emoji fallback)
     for (const enemy of enemiesRef.current) {
-      ctx.shadowBlur = 5;
-      
-      if (enemy.type === 'normal') {
-        ctx.fillStyle = '#ff4444';
-        ctx.beginPath();
-        ctx.moveTo(enemy.x + ENEMY_SIZE / 2, enemy.y);
-        ctx.lineTo(enemy.x + ENEMY_SIZE - 5, enemy.y + ENEMY_SIZE - 10);
-        ctx.lineTo(enemy.x + ENEMY_SIZE / 2, enemy.y + ENEMY_SIZE);
-        ctx.lineTo(enemy.x + 5, enemy.y + ENEMY_SIZE - 10);
-        ctx.fill();
-        
-        ctx.fillStyle = '#ff6666';
-        ctx.fillRect(enemy.x + 10, enemy.y + 10, 15, 8);
-      } else if (enemy.type === 'fast') {
-        ctx.fillStyle = '#ff8800';
-        ctx.beginPath();
-        ctx.moveTo(enemy.x + ENEMY_SIZE / 2, enemy.y);
-        ctx.lineTo(enemy.x + ENEMY_SIZE - 8, enemy.y + ENEMY_SIZE - 10);
-        ctx.lineTo(enemy.x + ENEMY_SIZE / 2, enemy.y + ENEMY_SIZE);
-        ctx.lineTo(enemy.x + 8, enemy.y + ENEMY_SIZE - 10);
-        ctx.fill();
-        
-        // Sọc đỏ
-        ctx.fillStyle = '#ff0000';
-        ctx.fillRect(enemy.x + 8, enemy.y + 15, 19, 4);
-      } else if (enemy.type === 'tank') {
-        ctx.fillStyle = '#aa44ff';
-        ctx.fillRect(enemy.x + 5, enemy.y + 5, ENEMY_SIZE - 10, ENEMY_SIZE - 10);
-        ctx.fillStyle = '#cc66ff';
-        ctx.fillRect(enemy.x + 12, enemy.y + 15, 11, 15);
-        
-        // Mắt
-        ctx.fillStyle = '#ff0000';
-        ctx.fillRect(enemy.x + 8, enemy.y + 12, 5, 5);
-        ctx.fillRect(enemy.x + 22, enemy.y + 12, 5, 5);
+      let img: HTMLImageElement | null = null;
+      if (enemy.type === 'normal') img = enemyImages.normal;
+      else if (enemy.type === 'fast') img = enemyImages.fast;
+      else if (enemy.type === 'tank') img = enemyImages.tank;
+
+      if (img && img.complete) {
+        ctx.drawImage(img, enemy.x, enemy.y, ENEMY_SIZE, ENEMY_SIZE);
+      } else {
+        // Fallback: vẽ emoji
+        ctx.font = `${ENEMY_SIZE - 5}px "Segoe UI Emoji", "Apple Color Emoji"`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = 'white';
+        ctx.fillText(ENEMY_EMOJI[enemy.type], enemy.x + ENEMY_SIZE / 2, enemy.y + ENEMY_SIZE / 2);
+      }
+
+      // Hiển thị số máu cho tank
+      if (enemy.type === 'tank' && (enemy.hitCount || 0) > 0) {
+        ctx.font = '12px monospace';
+        ctx.fillStyle = 'red';
+        ctx.fillText(`${3 - (enemy.hitCount || 0)}`, enemy.x + ENEMY_SIZE / 2, enemy.y + 5);
       }
     }
 
-    // Vẽ explosions
+    // Explosions
     for (const exp of explosionsRef.current) {
       const size = 20 - exp.frames;
       ctx.fillStyle = `rgba(255, ${100 - exp.frames * 10}, 0, ${1 - exp.frames / 10})`;
@@ -398,10 +394,9 @@ export default function SpaceShooter() {
 
     ctx.shadowBlur = 0;
 
-    // Vẽ UI
+    // UI
     ctx.font = '20px "Press Start 2P", monospace';
     ctx.fillStyle = 'white';
-    ctx.shadowBlur = 2;
     ctx.fillText(`Score: ${score}`, 20, 50);
     ctx.fillText(`Level: ${level}`, 20, 90);
     ctx.fillText(`Lives: ${'❤️'.repeat(lives)}`, 20, 130);
@@ -409,50 +404,44 @@ export default function SpaceShooter() {
 
     // Màn hình bắt đầu
     if (!gameStarted && !gameOver) {
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.1)'
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
       ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-      
       ctx.font = 'bold 32px "Press Start 2P", monospace';
-      ctx.fillStyle = '#fff';
-      ctx.fillText('SPACE SHOOTER', GAME_WIDTH / 2 - 120, GAME_HEIGHT / 2 - 50);
-    
+      ctx.fillStyle = '#00ff00';
+      ctx.fillText('SPACE SHOOTER', GAME_WIDTH / 2 - 180, GAME_HEIGHT / 2 - 50);
+      ctx.font = '16px "Press Start 2P", monospace';
+      ctx.fillStyle = 'white';
+      ctx.fillText('Press SPACE to Start', GAME_WIDTH / 2 - 140, GAME_HEIGHT / 2 + 20);
+      ctx.fillText('Arrow Keys to Move', GAME_WIDTH / 2 - 130, GAME_HEIGHT / 2 + 60);
+      ctx.fillText('Hold SPACE to Shoot', GAME_WIDTH / 2 - 130, GAME_HEIGHT / 2 + 100);
     }
-    
+
     // Màn hình game over
     if (gameOver) {
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
       ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-      
-      ctx.font = 'bold 40px "Press Start 2P", monospace';
+      ctx.font = 'bold 32px "Press Start 2P", monospace';
       ctx.fillStyle = '#ff0000';
-      ctx.fillText('GAME OVER', GAME_WIDTH / 2 - 120, GAME_HEIGHT / 2 - 50);
-      
+      ctx.fillText('GAME OVER', GAME_WIDTH / 2 - 140, GAME_HEIGHT / 2 - 50);
       ctx.font = '20px "Press Start 2P", monospace';
       ctx.fillStyle = 'white';
       ctx.fillText(`Score: ${score}`, GAME_WIDTH / 2 - 90, GAME_HEIGHT / 2 + 20);
+      ctx.font = '14px "Press Start 2P", monospace';
+      ctx.fillStyle = '#00ff00';
+      ctx.fillText('Press SPACE to Play Again', GAME_WIDTH / 2 - 150, GAME_HEIGHT / 2 + 100);
     }
-  }, [gameStarted, gameOver, score, level, lives, highScore, playerRef.current, bulletsRef.current, enemiesRef.current, explosionsRef.current]);
+  }, [gameStarted, gameOver, score, level, lives, highScore, enemyImages]);
 
   // Game loop
   useEffect(() => {
-    let lastTime = 0;
-    const gameLoop = (currentTime: number) => {
-      if (lastTime === 0) {
-        lastTime = currentTime;
-      }
-      
+    const gameLoop = () => {
       updateGame();
       draw();
-      
       animationRef.current = requestAnimationFrame(gameLoop);
     };
-    
     animationRef.current = requestAnimationFrame(gameLoop);
-    
     return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-      }
+      if (animationRef.current) cancelAnimationFrame(animationRef.current);
     };
   }, [updateGame, draw]);
 
@@ -461,32 +450,34 @@ export default function SpaceShooter() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Space') {
         e.preventDefault();
-        if (!gameStarted && !gameOver) {
-          startGame();
-        } else if (gameOver) {
-          startGame();
-        } else {
-          keysRef.current.add(' ');
-        }
-      } else if (e.code === 'ArrowLeft' || e.code === 'ArrowRight' || 
-                 e.code === 'ArrowUp' || e.code === 'ArrowDown') {
+        if (!gameStarted && !gameOver) startGame();
+        else if (gameOver) startGame();
+        keysRef.current.add(' ');
+      } else if (
+        e.code === 'ArrowLeft' ||
+        e.code === 'ArrowRight' ||
+        e.code === 'ArrowUp' ||
+        e.code === 'ArrowDown'
+      ) {
         e.preventDefault();
         keysRef.current.add(e.code);
       }
     };
-    
+
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'Space') {
-        keysRef.current.delete(' ');
-      } else if (e.code === 'ArrowLeft' || e.code === 'ArrowRight' || 
-                 e.code === 'ArrowUp' || e.code === 'ArrowDown') {
+      if (e.code === 'Space') keysRef.current.delete(' ');
+      else if (
+        e.code === 'ArrowLeft' ||
+        e.code === 'ArrowRight' ||
+        e.code === 'ArrowUp' ||
+        e.code === 'ArrowDown'
+      ) {
         keysRef.current.delete(e.code);
       }
     };
-    
+
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
-    
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
@@ -495,12 +486,12 @@ export default function SpaceShooter() {
 
   return (
     <div className="min-h-screen bg-linear-to-br from-[#1a1a2e] to-[#16213e] flex items-center justify-center p-4">
-      <div className="bg-gray-800 shadow-2xl">
+      <div className="bg-gray-800 shadow-2xl rounded-lg">
         <canvas
           ref={canvasRef}
           width={GAME_WIDTH}
           height={GAME_HEIGHT}
-          className="shadow-lg cursor-pointer"
+          className="rounded-lg shadow-lg cursor-pointer"
           style={{ display: 'block', margin: '0 auto' }}
         />
       </div>

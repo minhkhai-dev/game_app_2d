@@ -22,7 +22,6 @@ const GAME_WIDTH = 1000;
 const GAME_HEIGHT = 500;
 const BIRD_SIZE = 30;
 const PIPE_WIDTH = 60;
-const PIPE_GAP = 150;
 const GRAVITY = 0.5;
 const JUMP_FORCE = -8;
 const PIPE_SPACING = 250;
@@ -33,6 +32,7 @@ export default function FlappyBird() {
     const [gameStarted, setGameStarted] = useState<boolean>(false);
     const [gameOver, setGameOver] = useState<boolean>(false);
     const [score, setScore] = useState<number>(0);
+    const [pipeGap, setPipeGap] = useState<number>(300)
     const [highScore, setHighScore] = useState<number>(0);
 
     const birdRef = useRef<Bird>({ x: 100, y: GAME_HEIGHT / 2, velocity: 0 });
@@ -55,11 +55,11 @@ export default function FlappyBird() {
 
         // Tạo ống ban đầu
         for (let i = 0; i < 3; i++) {
-            const topHeight = Math.random() * (GAME_HEIGHT - PIPE_GAP - 100) + 50;
+            const topHeight = Math.random() * (GAME_HEIGHT - pipeGap - 100) + 50;
             pipesRef.current.push({
                 x: GAME_WIDTH + i * PIPE_SPACING,
                 topHeight: topHeight,
-                bottomY: topHeight + PIPE_GAP,
+                bottomY: topHeight + pipeGap,
                 passed: false,
             });
         }
@@ -104,11 +104,11 @@ export default function FlappyBird() {
 
             // Tạo ống mới khi ống cũ ra khỏi màn hình
             if (pipe.x + PIPE_WIDTH < 0) {
-                const topHeight = Math.random() * (GAME_HEIGHT - PIPE_GAP - 100) + 50;
+                const topHeight = Math.random() * (GAME_HEIGHT - pipeGap - 100) + 50;
                 pipesRef.current[i] = {
                     x: GAME_WIDTH,
                     topHeight: topHeight,
-                    bottomY: topHeight + PIPE_GAP,
+                    bottomY: topHeight + pipeGap,
                     passed: false,
                 };
             }
@@ -130,6 +130,7 @@ export default function FlappyBird() {
             if (!pipe.passed && pipe.x + PIPE_WIDTH < birdRef.current.x) {
                 pipe.passed = true;
                 setScore(prev => prev + 1);
+                setPipeGap(Math.random() * 300 + 150)
             }
         }
 
